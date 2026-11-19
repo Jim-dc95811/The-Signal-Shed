@@ -146,7 +146,7 @@ status: ✅ proven · 🧪 simulated/partial · 🔬 to research · 🔒 needs c
 | 25 | Photo **upload** (camera-capture file) | ← | today | 🧪 | proof-of-completion, hazard photo, no app |
 | 26 | File upload (any) | ← | today | 🔬 | drop a track log / doc onto the box |
 | 27 | Audio/voice-memo upload (recorded file) | ← | today | 🔬 | a spoken report filed as a clip |
-| 28 | **Phone GPS → box** (Geolocation API) | ← | +cert | 🔒 | **every crew phone becomes a tracked unit, no radio** |
+| 28 | **Phone GPS → box** (Geolocation API) | ← | +cert | 🔒✅ | **every crew phone becomes a tracked unit, no radio** — mechanism proven, `experiments/28_phone_gps` |
 | 29 | **Live camera** (getUserMedia) | ← | +cert | 🔒 | a phone as a field camera to the box |
 | 30 | **Live mic** (getUserMedia) | ← | +cert | 🔒 | push-to-talk / live audio from a phone |
 | 31 | QR / barcode scan | ← | today¹ | 🔬 | scan asset tags (¹ via uploaded photo today; live needs cert) |
@@ -199,3 +199,12 @@ once and five systems light up. That's the first real research task after this c
   top prize (crew phones as units, no radio) and the **fleet-cert question** as the first
   real research task (it unlocks five 🔒 systems at once). Repo decision pending: likely a
   separate "lab" repo to keep the OG Lookout pristine.
+- **2026-11-19 (Thu, later):** Spun up this repo — **The Signal Shed**, The Lookout's lab —
+  and moved the diary + demos here; The Lookout kept a one-line pointer (OG pristine). Then
+  **went at #28 and the fleet cert, and PROVED the mechanism** (`experiments/28_phone_gps`):
+  a private **Lookout Fleet CA** → box serves HTTPS → the phone's Geolocation API works →
+  a mocked fix POSTed and the box listed the phone as a unit. Self-test confirmed the gate:
+  `secureContext=false` + button disabled on http, `true` + working on https. **Cert decision:
+  private CA** (offline-forever, no domain/renewal; Lookout Manager will generate it). Left:
+  the real-device CA install + wiring HTTPS into `units_kml.py` + graduating the receiver into
+  the unit feed. Same cert then unlocks phone camera/mic (#29/#30) for free.

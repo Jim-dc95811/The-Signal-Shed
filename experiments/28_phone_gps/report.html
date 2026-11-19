@@ -1,0 +1,66 @@
+<!doctype html><html lang=en><head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Share my position · The Lookout</title>
+<style>
+:root{--bg:#0d1117;--panel:#131a22;--pan2:#172230;--line:#223042;--fg:#dbe6f0;--mut:#8aa0b4;--grn:#2ec16b;--grn2:#49d17a;--red:#ff6a6a;--amb:#f0b950;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:560px;margin:0 auto;padding:22px max(16px,env(safe-area-inset-left)) 60px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700}
+.dot{width:11px;height:11px;border-radius:50%;background:var(--grn);box-shadow:0 0 10px var(--grn)}
+h1{font-size:21px;margin:14px 0 4px}.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
+.ctx{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:16px;font-size:14px}
+.ctx .tag{margin-left:auto;font-weight:700;font-size:12px;padding:2px 10px;border-radius:999px}
+.ok{color:var(--grn2);border:1px solid #2ec16b55}.bad{color:var(--red);border:1px solid #ff6a6a55}
+.btn{width:100%;background:var(--grn);color:#06130b;font-weight:800;border:0;border-radius:12px;padding:15px;font-size:17px;cursor:pointer}
+.btn:disabled{background:var(--pan2);color:var(--mut);cursor:not-allowed}
+.status{margin:14px 0;min-height:22px;font-size:14px;color:var(--mut)}
+.status b{color:var(--grn2)}
+.units{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 0;margin-top:10px}
+.u{display:flex;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:14px}
+.u:last-child{border-bottom:0}.u b{color:var(--fg)}.u span{color:var(--mut);margin-left:auto;font-variant-numeric:tabular-nums}
+.hint{color:var(--mut);font-size:12.5px;margin-top:16px;line-height:1.6}
+code{background:#000;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:12.5px}
+</style></head><body>
+<div class=wrap>
+  <div class=brand><span class=dot></span>THE LOOKOUT</div>
+  <h1>Share my position</h1>
+  <p class=sub>Put this phone on the map as a unit — no app, just the browser.</p>
+
+  <div class=ctx id=ctx><span id=ctxt>checking…</span><span class=tag id=ctag>—</span></div>
+
+  <button class=btn id=go>📍 Share my position</button>
+  <div class=status id=st></div>
+
+  <div class=units id=units hidden></div>
+
+  <p class=hint id=hint></p>
+</div>
+<script>
+var secure=window.isSecureContext, hasGeo=('geolocation' in navigator);
+var ctxt=document.getElementById('ctxt'),ctag=document.getElementById('ctag'),ctx=document.getElementById('ctx');
+var go=document.getElementById('go'),st=document.getElementById('st'),hint=document.getElementById('hint');
+var ID='phone-'+Math.random().toString(36).slice(2,6);
+if(secure){ctxt.textContent='Secure connection — GPS is available.';ctag.textContent='HTTPS · secure';ctag.className='tag ok'}
+else{ctxt.textContent='Plain http — the browser blocks GPS here.';ctag.textContent='HTTP · blocked';ctag.className='tag bad';go.disabled=true;
+  hint.innerHTML='Open this page over <code>https://</code> (install the fleet certificate once) and the button works. This is the secure-context gate.'}
+go.onclick=function(){
+  if(!hasGeo){st.textContent='This browser has no geolocation.';return}
+  st.textContent='getting a fix…';
+  navigator.geolocation.getCurrentPosition(function(p){
+    var body=JSON.stringify({id:ID,lat:p.coords.latitude,lon:p.coords.longitude,acc:Math.round(p.coords.accuracy)});
+    fetch('/report',{method:'POST',headers:{'Content-Type':'application/json'},body:body})
+      .then(function(r){return r.json()}).then(function(j){
+        st.innerHTML=j.ok?('<b>On the map.</b> '+p.coords.latitude.toFixed(5)+', '+p.coords.longitude.toFixed(5)+' (±'+Math.round(p.coords.accuracy)+' m)'):'box refused the fix';
+        poll();
+      }).catch(function(){st.textContent='could not reach the box'});
+  },function(e){st.textContent='GPS error: '+e.message},{enableHighAccuracy:true,timeout:8000});
+};
+function poll(){fetch('/units.json').then(function(r){return r.json()}).then(function(list){
+  var u=document.getElementById('units');if(!list.length){u.hidden=true;return}u.hidden=false;
+  u.innerHTML='<div class=u style="color:var(--mut);font-size:12px;border:0;padding-bottom:2px">ON THE BOX</div>'+
+    list.map(function(x){return '<div class=u><b>'+x.id+'</b><span>'+x.lat+', '+x.lon+' · '+x.t+'</span></div>'}).join('');
+}).catch(function(){})}
+// expose for the self-test
+window.__ctx=function(){return {secure:secure,hasGeo:hasGeo}};
+poll();setInterval(poll,2000);
+</script></body></html>

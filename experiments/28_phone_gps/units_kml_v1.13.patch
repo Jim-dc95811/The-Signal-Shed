@@ -1,0 +1,185 @@
+--- /home/claude/the-lookout/units_kml.py	2026-11-16 21:21:59.271185521 -0500
++++ units_kml_https.py	2026-11-19 19:01:52.505289379 -0500
+@@ -57,11 +57,18 @@
+ import re, time, math, json, socket, threading, sys, argparse
+ from collections import deque
+ from pathlib import Path
+-import os, sqlite3, struct, zipfile
++import os, sqlite3, struct, zipfile, ssl
+ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+ from urllib.parse import urlparse, parse_qs
+ 
+-VERSION = "1.12"
++VERSION = "1.13"
++
++# v1.13 (Signal Shed #28): optional HTTPS on :8443 so a phone can share its OWN GPS back
++# (browsers gate geolocation/camera/mic to secure contexts). Enabled ONLY when certs are
++# present (certs/server.crt + server.key) - otherwise byte-for-byte identical to v1.12 and
++# :8080 http stays exactly as before for the map viewers. The box serves its fleet CA at
++# /ca, a "share my position" page at /share, and accepts a phone fix at POST /report, which
++# folds that phone into the same live unit list. Generate the certs with make_certs.sh.
+ 
+ # ---- where we read from / serve to ----
+ BRIDGE_HOST = "127.0.0.1"     # the bridge's NMEA feed (same box)
+@@ -76,6 +83,8 @@
+ ADMIN_TOKEN_DEFAULT = "lookout"   # shared token for the Alias Manager; override via admin_token.txt
+ ALIASES_PATH  = Path(__file__).with_name("aliases.json")   # unit id -> name, read live every refresh
+ LOG_DIR     = Path(__file__).with_name("logs")   # daily track CSVs land here
++HTTPS_PORT  = 8443          # TLS listener for secure-context features; OFF unless certs present
++CERT_DIR    = Path(__file__).with_name("certs")   # server.crt + server.key enable https; lookout-ca.crt served at /ca
+ 
+ # ---------- offline maps: served straight off whatever removable drive is plugged in ----------
+ # .tpkx is Esri Compact Cache V2 (exactly what mb2tpkx / ArcGIS Earth use) and .mbtiles is SQLite;
+@@ -429,6 +438,13 @@
+         _units[str(rep.unit)] = {"lat": rep.lat, "lon": rep.lon, "alt": rep.alt,
+                                  "sats": rep.sats, "utc": rep.utc, "seen": time.monotonic()}
+ 
++def _put_phone(uid, lat, lon, acc):
++    """A phone reported its own GPS (POST /report over https). Fold it into the same live
++    list as the radio units, flagged phone=True so the map can mark it apart."""
++    with _lock:
++        _units[str(uid)] = {"lat": lat, "lon": lon, "alt": "0", "sats": "", "utc": "",
++                            "seen": time.monotonic(), "phone": True, "acc": acc}
++
+ # ---------- daily track log ----------
+ def _log_fix(rep):
+     """Append one row per real fix. Never let a logging error break the live feed."""
+@@ -562,12 +578,65 @@
+ # it polls /units.json every few seconds and plots the units on a scaled grid.
+ 
+ 
++# ---------- HTTPS: enabled only when certs are present (phone GPS / camera / mic) ----------
++def _ssl_ctx():
++    """A TLS context if certs/server.crt + certs/server.key exist, else None (https stays off)."""
++    crt = CERT_DIR / "server.crt"; key = CERT_DIR / "server.key"
++    if not (crt.exists() and key.exists()):
++        return None
++    try:
++        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
++        ctx.load_cert_chain(str(crt), str(key))
++        return ctx
++    except (OSError, ssl.SSLError) as e:
++        print(f"[units] cert load failed, https off: {e}", flush=True)
++        return None
++
++# "Share my position" - served at /share over https. Reads the phone's own GPS and POSTs it.
++SHARE_HTML = """<!doctype html><html lang=en><head>
++<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
++<title>Share my position · The Lookout</title><style>
++:root{--bg:#0d1117;--panel:#131a22;--pan2:#172230;--line:#223042;--fg:#dbe6f0;--mut:#8aa0b4;--grn:#2ec16b;--grn2:#49d17a;--red:#ff6a6a;color-scheme:dark}
++*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
++.w{max-width:560px;margin:0 auto;padding:22px max(16px,env(safe-area-inset-left)) 60px}
++.b{display:flex;align-items:center;gap:9px;font-weight:700}.dot{width:11px;height:11px;border-radius:50%;background:var(--grn);box-shadow:0 0 10px var(--grn)}
++h1{font-size:21px;margin:14px 0 4px}.s{color:var(--mut);font-size:14px;margin:0 0 18px}
++.c{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:16px;font-size:14px}
++.c .t{margin-left:auto;font-weight:700;font-size:12px;padding:2px 10px;border-radius:999px}.ok{color:var(--grn2);border:1px solid #2ec16b55}.bad{color:var(--red);border:1px solid #ff6a6a55}
++.btn{width:100%;background:var(--grn);color:#06130b;font-weight:800;border:0;border-radius:12px;padding:15px;font-size:17px;cursor:pointer}.btn:disabled{background:var(--pan2);color:var(--mut)}
++.st{margin:14px 0;min-height:22px;font-size:14px;color:var(--mut)}.st b{color:var(--grn2)}
++.u{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 0;margin-top:10px}.r{display:flex;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:14px}.r:last-child{border-bottom:0}.r b{color:var(--fg)}.r span{color:var(--mut);margin-left:auto}
++.h{color:var(--mut);font-size:12.5px;margin-top:16px;line-height:1.6}code{background:#000;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:12.5px}
++</style></head><body><div class=w>
++<div class=b><span class=dot></span>THE LOOKOUT</div><h1>Share my position</h1>
++<p class=s>Put this phone on the map as a unit — no app, just the browser.</p>
++<div class=c id=c><span id=ct>checking…</span><span class=t id=cg>—</span></div>
++<button class=btn id=go>📍 Share my position</button><div class=st id=st></div>
++<div class=u id=u hidden></div><p class=h id=hint></p></div><script>
++var sec=window.isSecureContext,geo=('geolocation'in navigator);
++var ct=document.getElementById('ct'),cg=document.getElementById('cg'),go=document.getElementById('go'),st=document.getElementById('st'),hint=document.getElementById('hint');
++var ID='phone-'+Math.random().toString(36).slice(2,6);
++var name=prompt?null:null;
++if(sec){ct.textContent='Secure connection — GPS is available.';cg.textContent='HTTPS · secure';cg.className='t ok';}
++else{ct.textContent='Plain http — the browser blocks GPS here.';cg.textContent='HTTP · blocked';cg.className='t bad';go.disabled=true;hint.innerHTML='Open this over <code>https://</code> (install the fleet certificate once) and the button works.';}
++go.onclick=function(){if(!geo){st.textContent='no geolocation in this browser';return;}st.textContent='getting a fix…';
++navigator.geolocation.getCurrentPosition(function(p){var body=JSON.stringify({id:ID,lat:p.coords.latitude,lon:p.coords.longitude,acc:Math.round(p.coords.accuracy)});
++fetch('/report',{method:'POST',headers:{'Content-Type':'application/json'},body:body}).then(function(r){return r.json();}).then(function(j){st.innerHTML=j.ok?('<b>On the map.</b> '+p.coords.latitude.toFixed(5)+', '+p.coords.longitude.toFixed(5)+' (±'+Math.round(p.coords.accuracy)+' m)'):'box refused the fix';poll();}).catch(function(){st.textContent='could not reach the box';});},
++function(e){st.textContent='GPS error: '+e.message;},{enableHighAccuracy:true,timeout:8000});};
++function poll(){fetch('/units.json').then(function(r){return r.json();}).then(function(d){var u=document.getElementById('u');var list=d.units||[];if(!list.length){u.hidden=true;return;}u.hidden=false;u.innerHTML='<div class=r style="color:var(--mut);font-size:12px;border:0">ON THE BOX</div>'+list.map(function(x){return '<div class=r><b>'+x.name+'</b><span>'+x.lat+', '+x.lon+' · '+x.age+'</span></div>';}).join('');}).catch(function(){});}
++poll();setInterval(poll,2000);
++</script></body></html>"""
++
+ # ---------- HTTP server ----------
+ class _H(BaseHTTPRequestHandler):
+     def do_GET(self):
+         path = urlparse(self.path).path.rstrip("/")
+         if path == "/admin/aliases":
+             return self._admin(read=True)
++        if path == "/ca":
++            return self._serve_ca()          # the fleet CA cert, for devices to install
++        if path in ("/share", "/me"):
++            return self._serve_share()        # "share my position" page (needs https for GPS)
+         if path in ("/open.kml", "/open", "/live", "/live.kml"):
+             return self._serve_opener()   # one URL any device opens to get the LIVE, refreshing map
+         if path == "/fetchlog":
+@@ -651,10 +720,49 @@
+         self.wfile.write(kml)
+ 
+     def do_POST(self):
+-        if urlparse(self.path).path.rstrip("/") == "/admin/aliases":
++        p = urlparse(self.path).path.rstrip("/")
++        if p == "/admin/aliases":
+             return self._admin(read=False)
++        if p == "/report":
++            return self._report()            # a phone posting its own GPS fix
+         self.send_error(404)
+ 
++    # ---- phone-GPS feature (#28): serve the CA, the share page, and receive fixes ----
++    def _serve_ca(self):
++        try:
++            data = (CERT_DIR / "lookout-ca.crt").read_bytes()
++        except OSError:
++            self.send_error(404); return
++        self.send_response(200)
++        self.send_header("Content-Type", "application/x-x509-ca-cert")
++        self.send_header("Content-Disposition", 'attachment; filename="lookout-fleet-ca.crt"')
++        self.send_header("Content-Length", str(len(data)))
++        self.end_headers(); self.wfile.write(data)
++
++    def _serve_share(self):
++        body = SHARE_HTML.encode("utf-8")
++        self.send_response(200)
++        self.send_header("Content-Type", "text/html; charset=utf-8")
++        self.send_header("Content-Length", str(len(body)))
++        self.send_header("Cache-Control", "no-store")
++        self.end_headers(); self.wfile.write(body)
++
++    def _report(self):
++        try:
++            n = int(self.headers.get("Content-Length", 0))
++            if n <= 0 or n > 4096:
++                return self._json(400, {"ok": False, "error": "bad length"})
++            d = json.loads(self.rfile.read(n).decode("utf-8"))
++        except (ValueError, OSError) as e:
++            return self._json(400, {"ok": False, "error": str(e)})
++        lat = d.get("lat"); lon = d.get("lon")
++        if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))
++                and _valid_coord(float(lat), float(lon))):
++            return self._json(400, {"ok": False, "error": "bad coords"})
++        uid = (str(d.get("id") or "phone")).strip()[:24] or "phone"
++        _put_phone(uid, float(lat), float(lon), d.get("acc"))
++        return self._json(200, {"ok": True, "id": uid})
++
+     # ---- Alias Manager endpoint: GET returns the names, POST replaces them ----
+     def _admin(self, read):
+         q = parse_qs(urlparse(self.path).query)
+@@ -741,8 +849,20 @@
+     print(f"serving units.kml on http://{SERVE_HOST}:{SERVE_PORT}/units.kml  (Ctrl+C to stop)", flush=True)
+     print(f"   diagnostic: who pulls the map + how often -> http://{SERVE_HOST}:{SERVE_PORT}/fetchlog", flush=True)
+     threading.Thread(target=(demo_feed if args.demo else read_bridge), daemon=True).start()
++    http_srv = ThreadingHTTPServer((SERVE_HOST, SERVE_PORT), _H)
++    ctx = _ssl_ctx()
++    if ctx is not None:
++        try:
++            https_srv = ThreadingHTTPServer((SERVE_HOST, HTTPS_PORT), _H)
++            https_srv.socket = ctx.wrap_socket(https_srv.socket, server_side=True)
++            threading.Thread(target=https_srv.serve_forever, daemon=True).start()
++            print(f"   secure (phone GPS/camera/mic): https://{SERVE_HOST}:{HTTPS_PORT}/share  (CA at /ca)", flush=True)
++        except OSError as e:
++            print(f"[units] https disabled: {e}", flush=True)
++    else:
++        print("   (no certs in ./certs - https off; run make_certs.sh to enable phone GPS)", flush=True)
+     try:
+-        ThreadingHTTPServer((SERVE_HOST, SERVE_PORT), _H).serve_forever()
++        http_srv.serve_forever()
+     except KeyboardInterrupt:
+         print("\n[units] stopped.", flush=True)
+         sys.exit(0)

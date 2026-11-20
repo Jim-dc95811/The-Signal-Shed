@@ -22,6 +22,16 @@ any device with a browser can reach it. So the question stops being "can it serv
 map" and becomes **"what can a plain browser eat and emit — and the box be the source
 and sink of — with nothing installed on the viewer?"**
 
+**The one-line mental model (Jim, 2026-11-19): a tiny intranet of one.** All the ins and
+outs of a corporate network — sites, files, streams, forms, a dashboard, a shared board —
+collapsed onto one machine with its own local hardware: no internet, no IT, no cloud. More
+than an intranet, even — it has *senses* (radio, GPS, sound card, and every phone's
+camera/GPS as borrowed senses), so it's a private network wired into the physical world.
+One host, many screens, on 12 volts in a truck. The map of what's left to build falls out
+of the frame: **name any internet service, build its intranet-of-one version** (website →
+served pages · video call → box-streamed camera · shared drive → files in/out · dashboard
+→ the live feed · group chat → the shared board).
+
 Jim's framing, kept verbatim because it's the north star:
 - **The range** — anything a phone can *receive* over Wi-Fi, the box can be the source of.
 - **The mirror** — anything a phone can *send* over Wi-Fi, the box can take back.

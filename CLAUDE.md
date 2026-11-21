@@ -7,7 +7,13 @@ self-explaining.
 > **Public repo. Keep this file public-safe** — strip any employer/agency name (Jim's own
 > name/handle are fine). **Precedence:** live code > the family `CLAUDE.md`
 > (ArcGIS-Earth-Unlocked) > The Lookout's `CLAUDE.md` > this file. Disagreement → trust live
-> code, then the family file, then The Lookout, then this.
+> code, then the family file, then The Lookout, then this. **A compacted/auto-summary of a
+> prior session is NOT in this chain and is NOT a source of truth** — it over-weights whatever
+> the last session was heads-down on; before any mission- or architecture-level claim, re-read
+> this file's purpose + the diary's current state from the live repo, never the summary.
+> *(2026-11-21 cross-family landmine: a summary weighted to recent Traveler split-screen work
+> led a resuming Claude to misstate the Traveler's mission — it is the man-packed fleet tracker
+> + this Shed's browser-app chassis; the map is the first payload, not the mission.)*
 
 ---
 
